@@ -1,2 +1,12 @@
 *.o
+
 prog2_vecintrin/myexp
+
+prog3_mandelbrot_ispc/objs
+prog3_mandelbrot_ispc/mandelbrot_ispc
+
+prog6_kmeans/data*
+prog6_kmeans/start*
+prog6_kmeans/end*
+prog6_kmeans/dist.ispc
+prog6_kmeans/kmeans

@@ -8,6 +8,12 @@
 
 using namespace std;
 
+#define MAX_THREADS 32
+
+bool parallel = true;
+
+extern "C" void dist_ispc(double* x, double* y, int nDim, double* result);
+
 typedef struct {
   // Control work assignments
   int start, end;
@@ -54,11 +60,39 @@ static bool stoppingConditionMet(double *prevCost, double *currCost,
  *     (must be the same for x and y).
  */
 double dist(double *x, double *y, int nDim) {
-  double accum = 0.0;
-  for (int i = 0; i < nDim; i++) {
-    accum += pow((x[i] - y[i]), 2);
+  if (parallel) {
+    double distance;
+    dist_ispc(x, y, nDim, &distance);
+    return distance;
   }
-  return sqrt(accum);
+  else {
+    double accum = 0.0;
+    for (int i = 0; i < nDim; i++) {
+      accum += pow((x[i] - y[i]), 2);
+    }
+    return sqrt(accum);
+  }
+}
+
+void init_assignments(WorkerArgs *const args, double *minDist, int offset, int block_size) {
+  // Initialize arrays
+  for (int m =offset; m < offset+block_size; m++) {
+    minDist[m] = 1e30;
+    args->clusterAssignments[m] = -1;
+  }
+}
+
+void batched_assign(WorkerArgs *const args, double *minDist, int offset, int block_size) {
+  for (int k = args->start; k < args->end; k++) {
+    for (int m = offset; m < offset+block_size; m++) {
+      double d = dist(&args->data[m * args->N],
+                      &args->clusterCentroids[k * args->N], args->N);
+      if (d < minDist[m]) {
+        minDist[m] = d;
+        args->clusterAssignments[m] = k;
+      }
+    }
+  }
 }
 
 /**
@@ -67,20 +101,54 @@ double dist(double *x, double *y, int nDim) {
 void computeAssignments(WorkerArgs *const args) {
   double *minDist = new double[args->M];
   
-  // Initialize arrays
-  for (int m =0; m < args->M; m++) {
-    minDist[m] = 1e30;
-    args->clusterAssignments[m] = -1;
+  int num_threads = min(MAX_THREADS, args->M);
+  std::thread workers[num_threads];
+  int block_size;
+  block_size = (args->M+num_threads-1)/num_threads; // ceiling
+  int curr_block_size;
+  if (parallel){
+    for (int i=1; i<num_threads; i++) {
+      curr_block_size = min(block_size, args->M - i*block_size);
+      workers[i] = std::thread(init_assignments, args, minDist, i*block_size, curr_block_size);
+    }
+
+    init_assignments(args, minDist, 0, block_size);
+
+    // join worker threads
+    for (int i=1; i<num_threads; i++) {
+      workers[i].join();
+    }
+  }
+  else {
+    // Initialize arrays
+    for (int m =0; m < args->M; m++) {
+      minDist[m] = 1e30;
+      args->clusterAssignments[m] = -1;
+    }
   }
 
-  // Assign datapoints to closest centroids
-  for (int k = args->start; k < args->end; k++) {
-    for (int m = 0; m < args->M; m++) {
-      double d = dist(&args->data[m * args->N],
-                      &args->clusterCentroids[k * args->N], args->N);
-      if (d < minDist[m]) {
-        minDist[m] = d;
-        args->clusterAssignments[m] = k;
+  if (parallel) {
+    for (int i=1; i<num_threads; i++) {
+      curr_block_size = min(block_size, args->M - i*block_size);
+      workers[i] = std::thread(batched_assign, args, minDist, i*block_size, curr_block_size);
+    }
+
+    batched_assign(args, minDist, 0, block_size);
+
+    // join worker threads
+    for (int i=1; i<num_threads; i++) {
+      workers[i].join();
+    }
+  }
+  else {
+    for (int k = args->start; k < args->end; k++) {
+      for (int m = 0; m < args->M; m++) {
+        double d = dist(&args->data[m * args->N],
+                        &args->clusterCentroids[k * args->N], args->N);
+        if (d < minDist[m]) {
+          minDist[m] = d;
+          args->clusterAssignments[m] = k;
+        }
       }
     }
   }
@@ -206,13 +274,32 @@ void kMeansThread(double *data, double *clusterCentroids, int *clusterAssignment
     // Setup args struct
     args.start = 0;
     args.end = K;
-
+    
+    double startTime = CycleTimer::currentSeconds();
+    double curr_time;
     computeAssignments(&args);
+    if (iter==0) {
+      curr_time = CycleTimer::currentSeconds();
+      printf("time: %.3f ms, ", (curr_time-startTime));
+      startTime = curr_time;
+    }
     computeCentroids(&args);
+    if (iter==0) {
+      curr_time = CycleTimer::currentSeconds();
+      printf("time: %.3f ms, ", (curr_time-startTime));
+      startTime = curr_time;
+    }
     computeCost(&args);
+    if (iter==0) {
+      curr_time = CycleTimer::currentSeconds();
+      printf("time: %.3f ms, ", (curr_time-startTime));
+      startTime = curr_time;
+    }
 
     iter++;
   }
+
+  printf("iterations: %d\n", iter);
 
   free(currCost);
   free(prevCost);
