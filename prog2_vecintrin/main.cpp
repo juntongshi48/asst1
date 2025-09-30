@@ -249,7 +249,70 @@ void clampedExpVector(float* values, int* exponents, float* output, int N) {
   // Your solution should work for any value of
   // N and VECTOR_WIDTH, not just when VECTOR_WIDTH divides N
   //
-  
+
+  __cs149_vec_float x;
+  __cs149_vec_int e;
+  __cs149_vec_float result;
+  __cs149_vec_float zero = _cs149_vset_float(0.f);
+  __cs149_mask mask_curr_window;
+  __cs149_mask mask;
+
+  __cs149_mask mask_all = _cs149_init_ones();
+  __cs149_mask mask_all_zeros = _cs149_init_ones(0);
+  __cs149_vec_int all_ones_int = _cs149_vset_int(1);
+  __cs149_vec_int all_zeros_int = _cs149_vset_int(0);
+  __cs149_vec_float max_value = _cs149_vset_float(9.999999f);
+
+  for (int i=0; i<N; i+=VECTOR_WIDTH) {
+
+    // get current window
+    int curr_block_start = i;
+    mask_curr_window = _cs149_init_ones();
+    if (N - i < VECTOR_WIDTH) {
+      curr_block_start = N - VECTOR_WIDTH;
+      mask_curr_window = _cs149_init_ones(i+VECTOR_WIDTH-N);
+      mask_curr_window = _cs149_mask_not(mask_curr_window);
+    }
+
+    // Load x
+    x = _cs149_vset_float(0.f);
+    _cs149_vload_float(x, values+curr_block_start, mask_curr_window);
+
+    // Load e
+    e = _cs149_vset_int(0);
+    _cs149_vload_int(e, exponents+curr_block_start, mask_curr_window);
+
+    // Main operation loop
+    __cs149_vec_int curr_power = _cs149_vset_int(1);
+    _cs149_vmove_float(result, x, mask_curr_window); // result = x
+     // all open at first
+    __cs149_mask mask_active_lanes = _cs149_mask_or(mask_all_zeros, mask_curr_window);
+    int cntbit = 0;
+    while(_cs149_cntbits(mask_active_lanes) > 0) {
+      // for e>curr_power
+      _cs149_vlt_int(mask_active_lanes, curr_power, e, mask_curr_window);
+      // result *= x
+      _cs149_vmult_float(result, result, x, mask_active_lanes);
+      // curr_power += 1
+      _cs149_vadd_int(curr_power, curr_power, all_ones_int, mask_all);
+      cntbit = _cs149_cntbits(mask_active_lanes);
+    }
+
+    // Handle the case where exponent is 0
+    __cs149_mask mask_is_zero = _cs149_init_ones(0);
+    _cs149_veq_int(mask_is_zero, e, all_zeros_int, mask_curr_window);
+    _cs149_vset_float(result, 1.f, mask_is_zero);
+
+    // Clamp to 9.999
+    __cs149_mask mask_gt_max = _cs149_init_ones(0);
+    _cs149_vgt_float(mask_gt_max, result, max_value, mask_curr_window);
+    _cs149_vset_float(result, 9.999999f, mask_gt_max);
+
+    // Write results back to memory
+    _cs149_vstore_float(output+curr_block_start, result, mask_curr_window);
+
+  // CS149Logger.printLog();
+  }
 }
 
 // returns the sum of all elements in values
