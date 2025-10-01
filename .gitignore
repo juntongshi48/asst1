@@ -1,4 +1,8 @@
 *.o
+*.ppm
+*.png
+
+prog1_mandelbrot_threads/mandelbrot
 
 prog2_vecintrin/myexp
 

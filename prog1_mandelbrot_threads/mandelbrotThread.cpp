@@ -1,7 +1,11 @@
 #include <stdio.h>
 #include <thread>
+#include <algorithm>
+#include <string.h>
 
 #include "CycleTimer.h"
+
+const bool round_robin=true; // latitudinal mapping if false
 
 typedef struct {
     float x0, x1;
@@ -22,6 +26,23 @@ extern void mandelbrotSerial(
     int maxIterations,
     int output[]);
 
+static inline int mandel(float c_re, float c_im, int count)
+{
+    float z_re = c_re, z_im = c_im;
+    int i;
+    for (i = 0; i < count; ++i) {
+
+        if (z_re * z_re + z_im * z_im > 4.f)
+            break;
+
+        float new_re = z_re*z_re - z_im*z_im;
+        float new_im = 2.f * z_re * z_im;
+        z_re = c_re + new_re;
+        z_im = c_im + new_im;
+    }
+
+    return i;
+}
 
 //
 // workerThreadStart --
@@ -36,6 +57,42 @@ void workerThreadStart(WorkerArgs * const args) {
     // half of the image and thread 1 could compute the bottom half.
 
     printf("Hello world from thread %d\n", args->threadId);
+
+    if (round_robin) {
+        float dx = (args->x1 - args->x0) / args->width;
+        float dy = (args->y1 - args->y0) / args->height;
+
+        int total_pixels = args->width * args->height;
+        for (int index = args->threadId; index < total_pixels; index += args->numThreads) {
+            int x_i = index % args->width;
+            int y_i = index / args->width;
+
+            float x = args->x0 + x_i * dx;
+            float y = args->y0 + y_i * dy;
+
+            args->output[index] = mandel(x, y, args->maxIterations);
+        }
+    }
+    else {
+        double startTime = CycleTimer::currentSeconds();
+        int rows_per_thread = (args->height+args->numThreads-1)/args->numThreads; // round up
+        int startRow = args->threadId*rows_per_thread;
+        int numRows = rows_per_thread;
+        if ((startRow + numRows) > args->height) {
+            numRows = args->height - startRow;
+        }
+
+        mandelbrotSerial(
+            args->x0, args->y0, args->x1, args->y1,
+            args->width, args->height,
+            startRow, numRows,
+            args->maxIterations,
+            args->output
+        );
+        double end_time = CycleTimer::currentSeconds();
+        printf("Thread %d took %.3f ms\n", args->threadId, (end_time - startTime)*1000);
+    }
+    
 }
 
 //
