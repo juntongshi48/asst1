@@ -8,6 +8,8 @@
 
 using namespace ispc;
 
+int version=2; //0: original, 1: most improvement, 2: least improvement
+
 extern void sqrtSerial(int N, float startGuess, float* values, float* output);
 
 static void verifyResult(int N, float* result, float* gold) {
@@ -33,8 +35,23 @@ int main() {
         // array here to meet the instructions in the handout: we want
         // to you generate best and worse-case speedups
         
-        // starter code populates array with random input values
-        values[i] = .001f + 2.998f * static_cast<float>(rand()) / RAND_MAX;
+        if (version==0) {
+            // starter code populates array with random input values
+            values[i] = .001f + 2.998f * static_cast<float>(rand()) / RAND_MAX;
+        }
+        else if (version==1) {
+            // version that gives most improvement over serial
+            values[i]=2.999;
+        }
+        else if (version==2) {
+            // version that gives least improvement over serial
+            if (i%8==0) {
+                values[i]=2.999;
+            }
+            else {
+                values[i]=1.0;
+            }
+        }
     }
 
     // generate a gold version to check results
